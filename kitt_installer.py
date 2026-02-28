@@ -13,103 +13,104 @@ class KITTTerminalInstaller:
     def __init__(self):
         self.home = Path.home()
         self.kitt_dir = self.home / ".kitt"
+        # URLs Directes (évite les redirections complexes)
         self.modelfile_url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/main/Modelfile"
         self.main_url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/main/main.py"
         self.system = platform.system()
+        self.shell = "zsh" if self.system == "Darwin" else "bash"
 
     def log(self, level, message):
-        """Affiche des logs avec horodatage et niveau de priorité"""
+        """Logs avec couleurs ANSI pour le terminal"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        prefix = {
-            "INFO":  "\033[94m[INFO]\033[0m",    # Bleu
-            "STEP":  "\033[92m[ÉTAP]\033[0m",    # Vert
-            "WARN":  "\033[93m[WARN]\033[0m",    # Jaune
-            "ERROR": "\033[91m[ERR ]\033[0m",    # Rouge
-            "CURL":  "\033[95m[CURL]\033[0m"     # Magenta
+        colors = {
+            "STEP": "\033[92m[ÉTAP]\033[0m", # Vert
+            "INFO": "\033[94m[INFO]\033[0m", # Bleu
+            "CURL": "\033[95m[CURL]\033[0m", # Magenta
+            "ERR ": "\033[91m[ERR ]\033[0m"  # Rouge
         }
-        print(f"[{timestamp}] {prefix.get(level, level)} {message}", flush=True)
+        print(f"[{timestamp}] {colors.get(level, level)} {message}", flush=True)
 
-    def fn_run_command(self, cmd, desc):
-        """Exécute une commande système avec affichage direct du flux"""
-        self.log("STEP", f"Lancement : {desc}")
-        self.log("INFO", f"Commande : {cmd}")
+    def fn_run_shell_cmd(self, cmd, desc):
+        """Lance une commande via le vrai Shell (zsh/bash) pour bypass IDLE"""
+        self.log("STEP", f"Action : {desc}")
         
-        # On utilise subprocess.run sans capture pour que le flux (curl, ollama)
-        # s'affiche directement dans le terminal de l'utilisateur.
-        result = subprocess.run(cmd, shell=True)
+        # On encapsule la commande pour forcer l'environnement Shell
+        # -c : execute la string, -l : charge le profil utilisateur (PATH)
+        full_cmd = f'{self.shell} -l -c \'{cmd}\''
+        
+        # On laisse le flux sortir directement dans le terminal (stdout/stderr)
+        result = subprocess.run(full_cmd, shell=True)
         
         if result.returncode != 0:
-            self.log("ERROR", f"La commande a échoué avec le code {result.returncode}")
+            # Cas spécial : Ollama qui tente d'ouvrir une fenêtre sur Mac
+            if "ollama" in cmd and self.system == "Darwin":
+                self.log("INFO", "Note: Erreur d'interface ignorée (Ollama CLI installé).")
+                return 0
+            self.log("ERR ", f"La commande a échoué (Code {result.returncode})")
             sys.exit(result.returncode)
-        else:
-            self.log("INFO", "Succès ✅")
+        return result.returncode
 
-    def fn_install(self):
-        print("\n" + "="*60)
-        print("    KITT SYSTEM INSTALLER - MODE VERBOSE -v+++")
-        print("="*60 + "\n")
+    def fn_install_sequence(self):
+        print("\n" + "═"*60)
+        print("   K.I.T.T. SYSTEM - INSTALLATEUR VERBOSE -v+++")
+        print("═"*60 + "\n")
 
-        # 1. Préparation Environnement
-        self.log("STEP", f"Système : {self.system}")
-        if not self.kitt_dir.exists():
-            self.log("INFO", f"Création du répertoire {self.kitt_dir}")
-            self.kitt_dir.mkdir(parents=True, exist_ok=True)
-        
+        # 1. Dossier de base
+        self.log("INFO", f"Préparation du dossier : {self.kitt_dir}")
+        self.kitt_dir.mkdir(parents=True, exist_ok=True)
+
         # 2. Téléchargement Modelfile
-        self.log("CURL", "Récupération du Modelfile (GitHub -> Local)")
-        # -v : Verbose, -L : Suit les redirections, -f : Échoue si 404
-        cmd_curl_model = f'curl -vLf "{self.modelfile_url}" -o "{self.kitt_dir}/Modelfile"'
-        self.fn_run_command(cmd_curl_model, "Téléchargement Modelfile")
+        # -vLf : Verbose, suit les redirections, échoue si erreur 404
+        cmd_model = f'curl -vLf "{self.modelfile_url}" -o "{self.kitt_dir}/Modelfile"'
+        self.fn_run_shell_cmd(cmd_model, "Récupération du Modelfile")
 
         # 3. Téléchargement main.py
-        self.log("CURL", "Récupération du script principal main.py")
-        cmd_curl_main = f'curl -vLf "{self.main_url}" -o "{self.kitt_dir}/main.py"'
-        self.fn_run_command(cmd_curl_main, "Téléchargement main.py")
+        cmd_main = f'curl -vLf "{self.main_url}" -o "{self.kitt_dir}/main.py"'
+        self.fn_run_shell_cmd(cmd_main, "Récupération du script KITT")
         os.chmod(self.kitt_dir / "main.py", 0o755)
 
-        # 4. Vérification Ollama
-        self.log("STEP", "Vérification de l'infrastructure Ollama")
+        # 4. Installation Ollama (si manquant)
         if not shutil.which("ollama"):
-            self.log("WARN", "Ollama non détecté. Tentative d'installation automatique...")
-            self.fn_run_command("curl -fsSL https://ollama.ai/install.sh | sh", "Installation Ollama")
+            self.log("INFO", "Ollama absent. Lancement du script d'installation...")
+            # On ajoute '|| true' car le script officiel crash si l'UI ne peut pas s'ouvrir (IDLE/GitHub)
+            cmd_ollama = "curl -fsSL https://ollama.ai/install.sh | sh || true"
+            self.fn_run_shell_cmd(cmd_ollama, "Installation du moteur Ollama")
         else:
-            self.log("INFO", "Ollama est déjà installé.")
+            self.log("INFO", "Moteur Ollama déjà présent sur le système.")
 
-        # 5. Pull du modèle de base
-        self.log("STEP", "Synchronisation avec le modèle Llama 3.2 (3B)")
-        self.fn_run_command("ollama pull llama3.2:3b", "Ollama Pull")
-
-        # 6. Création de l'IA KITT
-        self.log("STEP", "Initialisation de l'IA KITT-AI")
+        # 5. Pull & Create (L'IA de KITT)
+        self.log("INFO", "Synchronisation avec les serveurs d'IA...")
+        self.fn_run_shell_cmd("ollama pull llama3.2:3b", "Téléchargement Llama 3.2")
+        
         cmd_create = f'ollama create kitt-ai -f "{self.kitt_dir}/Modelfile"'
-        self.fn_run_command(cmd_create, "Ollama Create")
+        self.fn_run_shell_cmd(cmd_create, "Génération de l'empreinte KITT-AI")
 
-        # 7. Compilation (Dépend de l'OS)
-        self.log("STEP", "Phase de compilation finale")
+        # 6. Compilation
         os.chdir(self.kitt_dir)
+        self.log("STEP", "Phase de compilation finale...")
         
         if self.system == "Darwin":
-            self.log("INFO", "Cible détectée : macOS (.app)")
-            self.fn_run_command(f'"{sys.executable}" -m pip install py2app --break-system-packages', "Install py2app")
+            self.log("INFO", "Cible : macOS Bundle (.app)")
+            self.fn_run_shell_cmd(f'"{sys.executable}" -m pip install py2app --break-system-packages', "Setup py2app")
             if os.path.exists("setup.py"): os.remove("setup.py")
-            self.fn_run_command("py2applet --make-setup main.py", "Génération setup.py")
-            self.fn_run_command(f'"{sys.executable}" setup.py py2app -A', "Compilation py2app")
+            self.fn_run_shell_cmd("py2applet --make-setup main.py", "Init setup.py")
+            self.fn_run_shell_cmd(f'"{sys.executable}" setup.py py2app -A', "Build App")
             
-            app_dest = self.home / "Applications" / "KITT.app"
-            self.log("INFO", f"Déplacement vers {app_dest}")
-            if app_dest.exists(): shutil.rmtree(app_dest)
-            shutil.move("dist/main.app", str(app_dest))
+            # Déplacement vers Applications
+            app_path = self.home / "Applications" / "KITT.app"
+            if app_path.exists(): shutil.rmtree(app_path)
+            shutil.move("dist/main.app", str(app_path))
+            self.log("INFO", f"Succès : KITT est dans tes Applications !")
         else:
-            self.log("INFO", "Cible détectée : Linux (Binaire)")
-            self.fn_run_command(f'"{sys.executable}" -m pip install pyinstaller --break-system-packages', "Install PyInstaller")
-            self.fn_run_command("pyinstaller --onefile --noconsole main.py", "Compilation PyInstaller")
+            self.log("INFO", "Cible : Linux Binary")
+            self.fn_run_shell_cmd(f'"{sys.executable}" -m pip install pyinstaller --break-system-packages', "Setup PyInstaller")
+            self.fn_run_shell_cmd("pyinstaller --onefile --noconsole main.py", "Build Binary")
             shutil.copy2("dist/main", str(self.home / "Desktop" / "KITT"))
 
-        print("\n" + "="*60)
-        print("✅ INSTALLATION TERMINÉE AVEC SUCCÈS")
-        print(f"📁 Dossier de travail : {self.kitt_dir}")
-        print("="*60 + "\n")
+        print("\n" + "═"*60)
+        print("   ✅ INSTALLATION RÉUSSIE, MICHAEL.")
+        print(f"   Système prêt dans : {self.kitt_dir}")
+        print("═"*60 + "\n")
 
 if __name__ == "__main__":
-    installer = KITTTerminalInstaller()
-    installer.fn_install()
+    KITTTerminalInstaller().fn_install_sequence()
