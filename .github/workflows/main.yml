@@ -1,0 +1,24 @@
+name: Terminal Mac Debug
+on: push # Se lance à chaque fois que tu "push" du code
+
+jobs:
+  debug-job:
+    runs-on: macos-latest # GitHub lance un vrai Mac (M1/M2 ou Intel)
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Diagnostic Système
+        run: |
+          echo "--- INFOS SYSTÈME ---"
+          sw_vers
+          uname -a
+          which curl
+          curl --version
+          
+      - name: Test de ton bug Curl
+        run: |
+          mkdir -p ~/.kitt
+          # On teste l'URL directe qui pose problème
+          curl -vL "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/main/Modelfile" -o ~/.kitt/Modelfile
+          ls -la ~/.kitt/
