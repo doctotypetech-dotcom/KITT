@@ -1,361 +1,142 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-KITT Setup Interface - Installation automatisée pour macOS et Linux
-Gère l'installation d'Ollama, téléchargement du modèle et création de l'IA KITT
-"""
 
 import os
 import sys
 import subprocess
-import urllib.request
 import shutil
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading
 import platform
 
-
 class KITTInstaller:
-    """Classe principale pour gérer l'installation de KITT"""
-    
     def __init__(self):
         self.home = Path.home()
         self.kitt_dir = self.home / ".kitt"
         self.modelfile_url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/refs/heads/main/Modelfile"
-        self.modelfile_path = self.kitt_dir / "Modelfile"
         self.system = platform.system()
         
-        # Interface graphique
+        # UI Setup
         self.root = tk.Tk()
         self.root.title("KITT Installation Manager")
-        self.root.geometry("600x500")
-        self.setup_ui()
+        self.root.geometry("600x550")
+        self.fn_setup_ui()
         
-    def setup_ui(self):
-        """Configure l'interface utilisateur"""
-        # Frame principal
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    def fn_setup_ui(self):
+        main_frame = ttk.Frame(self.root, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Title
-        title = ttk.Label(main_frame, text="KITT Installation Manager", 
-                         font=("Arial", 14, "bold"))
-        title.grid(row=0, column=0, columnspan=2, pady=10)
+        ttk.Label(main_frame, text="📟 KITT Installer - Verbose Mode", font=("Arial", 14, "bold")).pack(pady=10)
         
-        # Info text
-        info = ttk.Label(main_frame, text="Système détecté: " + self.system,
-                        font=("Arial", 10))
-        info.grid(row=1, column=0, columnspan=2, pady=5)
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(fill=tk.X, pady=20)
         
-        # Progress frame
-        progress_frame = ttk.LabelFrame(main_frame, text="Progression", padding="10")
-        progress_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
+        # Log interne à l'UI
+        self.status_text = tk.Text(main_frame, height=15, width=70, font=("Courier", 9), bg="black", fg="#00ff00")
+        self.status_text.pack(fill=tk.BOTH, expand=True)
         
-        self.progress_var = tk.IntVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
-                                           maximum=100, length=400)
-        self.progress_bar.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=20)
         
-        # Status text
-        self.status_text = tk.Text(main_frame, height=15, width=70, 
-                                   font=("Courier", 9))
-        self.status_text.grid(row=3, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, 
-                                 command=self.status_text.yview)
-        scrollbar.grid(row=3, column=2, sticky=(tk.N, tk.S))
-        self.status_text.config(yscroll=scrollbar.set)
-        
-        # Button frame
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=4, column=0, columnspan=2, pady=10)
-        
-        self.start_btn = ttk.Button(button_frame, text="Démarrer Installation", 
-                                    command=self.start_installation)
+        self.start_btn = ttk.Button(btn_frame, text="Lancer l'installation (voir Terminal)", command=self.fn_run_full_install_sequence)
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
-        self.quit_btn = ttk.Button(button_frame, text="Quitter", 
-                                   command=self.root.quit)
-        self.quit_btn.pack(side=tk.LEFT, padx=5)
-        
-    def log(self, message):
-        """Affiche un message dans le log"""
+        ttk.Button(btn_frame, text="Quitter", command=self.root.quit).pack(side=tk.LEFT, padx=5)
+
+    def fn_log_both(self, message):
+        """Log à la fois dans l'interface et dans le terminal"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        log_message = f"[{timestamp}] {message}\n"
-        self.status_text.insert(tk.END, log_message)
+        full_msg = f"[{timestamp}] {message}"
+        
+        # Log Terminal (Précis)
+        print(f"\n{'='*60}\n{full_msg}\n{'='*60}", flush=True)
+        
+        # Log UI
+        self.status_text.insert(tk.END, full_msg + "\n")
         self.status_text.see(tk.END)
         self.root.update()
-        print(log_message, end='')
-        
-    def update_progress(self, value):
-        """Met à jour la barre de progression"""
-        self.progress_var.set(value)
-        self.root.update()
-        
-    def start_installation(self):
-        """Lance l'installation dans un thread séparé"""
+
+    def fn_run_full_install_sequence(self):
         self.start_btn.config(state=tk.DISABLED)
-        self.quit_btn.config(state=tk.DISABLED)
-        
-        thread = threading.Thread(target=self.run_installation)
-        thread.daemon = True
-        thread.start()
-        
-    def run_installation(self):
-        """Exécute tous les étapes d'installation"""
         try:
-            # Étape 1: Créer le dossier ~/.kitt
-            self.log("█ Étape 1/9: Création du dossier ~/.kitt")
-            self.create_kitt_directory()
-            self.update_progress(11)
-            
-            # Étape 2: Télécharger le Modelfile
-            self.log("█ Étape 2/9: Téléchargement du Modelfile")
-            self.download_modelfile()
-            self.update_progress(22)
-            
-            # Étape 3: Télécharger le main.py
-            self.log("█ Étape 3/9: Téléchargement du main.py")
-            self.download_main_py()
-            self.update_progress(33)
-            
-            # Étape 4: Installer Ollama
-            self.log("█ Étape 4/9: Installation d'Ollama (si nécessaire)")
-            self.install_ollama()
-            self.update_progress(44)
-            
-            # Étape 5: Télécharger le modèle llama3.2:3b
-            self.log("█ Étape 5/9: Téléchargement du modèle llama3.2:3b")
-            self.download_model()
-            self.update_progress(55)
-            
-            # Étape 6: Créer l'IA KITT
-            self.log("█ Étape 6/9: Création de l'IA KITT")
-            self.create_kitt_ai()
-            self.update_progress(66)
-            
-            # Étape 7: Installer PyInstaller
-            self.log("█ Étape 7/9: Installation de PyInstaller")
-            self.install_pyinstaller()
-            self.update_progress(77)
-            
-            # Étape 8: Compiler avec PyInstaller
-            self.log("█ Étape 8/9: Compilation avec PyInstaller")
-            self.compile_with_pyinstaller()
-            self.update_progress(88)
-            
-            # Étape 9: Copier les fichiers
-            self.log("█ Étape 9/9: Mise en place des fichiers")
-            self.copy_executable()
-            self.update_progress(100)
-            
-            self.log("\n✅ Installation terminée avec succès!")
-            messagebox.showinfo("Succès", "Installation de KITT terminée avec succès!")
-            
+            # 1. Dossier
+            self.fn_log_both("INIT : Création du dossier .kitt")
+            self.kitt_dir.mkdir(parents=True, exist_ok=True)
+            self.progress_var.set(10)
+
+            # 2. Modelfile avec CURL (Verbose)
+            self.fn_log_both("CURL : Téléchargement du Modelfile")
+            subprocess.run(["curl", "-vL", self.modelfile_url, "-o", str(self.kitt_dir / "Modelfile")], check=True)
+            self.progress_var.set(25)
+
+            # 3. main.py avec CURL (Verbose)
+            self.fn_log_both("CURL : Téléchargement du script main.py")
+            main_url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/refs/heads/main/main.py"
+            subprocess.run(["curl", "-vL", main_url, "-o", str(self.kitt_dir / "main.py")], check=True)
+            os.chmod(self.kitt_dir / "main.py", 0o755)
+            self.progress_var.set(40)
+
+            # 4. Ollama (Installation)
+            self.fn_log_both("SYSTEM : Vérification/Installation Ollama")
+            if not shutil.which("ollama"):
+                # On pipe le curl dans sh de manière verbeuse
+                cmd = "curl -fsSL https://ollama.ai/install.sh | sh"
+                subprocess.run(cmd, shell=True, check=True)
+            self.progress_var.set(55)
+
+            # 5. Modèle Llama (Logs temps réel d'Ollama)
+            self.fn_log_both("OLLAMA : Pull du modèle llama3.2:3b")
+            subprocess.run(["ollama", "pull", "llama3.2:3b"], check=True)
+            self.progress_var.set(70)
+
+            # 6. Création IA
+            self.fn_log_both("OLLAMA : Création de l'entité kitt-ai")
+            subprocess.run(["ollama", "create", "kitt-ai", "-f", str(self.kitt_dir / "Modelfile")], check=True)
+            self.progress_var.set(85)
+
+            # 7. Compilation
+            self.fn_log_both("BUILD : Compilation de l'exécutable final")
+            self.fn_compile_application()
+            self.progress_var.set(100)
+
+            self.fn_log_both("TERMINÉ : KITT est prêt à l'emploi.")
+            messagebox.showinfo("Succès", "Installation verbeuse terminée.")
+
+        except subprocess.CalledProcessError as e:
+            self.fn_log_both(f"ERREUR FATALE (Commande échouée) : {e}")
+            messagebox.showerror("Erreur Critique", f"La commande {e.cmd} a échoué. Vérifie le terminal.")
         except Exception as e:
-            self.log(f"\n❌ Erreur: {str(e)}")
-            messagebox.showerror("Erreur", f"Installation échouée:\n{str(e)}")
+            self.fn_log_both(f"ERREUR INCONNUE : {e}")
+            messagebox.showerror("Erreur", str(e))
         finally:
             self.start_btn.config(state=tk.NORMAL)
-            self.quit_btn.config(state=tk.NORMAL)
-            
-    def create_kitt_directory(self):
-        """Crée le dossier ~/.kitt s'il n'existe pas"""
-        if self.kitt_dir.exists():
-            self.log(f"  ✓ Le dossier {self.kitt_dir} existe déjà")
-        else:
-            self.kitt_dir.mkdir(parents=True, exist_ok=True)
-            self.log(f"  ✓ Dossier créé: {self.kitt_dir}")
-            
-    def download_modelfile(self):
-        """Télécharge le Modelfile depuis GitHub"""
-        try:
-            if self.modelfile_path.exists():
-                self.log(f"  ✓ Modelfile existe déjà: {self.modelfile_path}")
-            else:
-                self.log(f"  ⬇ Téléchargement depuis: {self.modelfile_url}")
-                urllib.request.urlretrieve(self.modelfile_url, self.modelfile_path)
-                self.log(f"  ✓ Modelfile téléchargé: {self.modelfile_path}")
-        except Exception as e:
-            raise Exception(f"Erreur lors du téléchargement du Modelfile: {e}")
-    
-    def download_main_py(self):
-        """Télécharge le main.py depuis GitHub"""
-        try:
-            main_py_url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/refs/heads/main/main.py"
-            main_py_path = self.kitt_dir / "main.py"
-            
-            if main_py_path.exists():
-                self.log(f"  ✓ main.py existe déjà: {main_py_path}")
-            else:
-                self.log(f"  ⬇ Téléchargement depuis: {main_py_url}")
-                urllib.request.urlretrieve(main_py_url, main_py_path)
-                # Rendre le fichier exécutable
-                main_py_path.chmod(0o755)
-                self.log(f"  ✓ main.py téléchargé: {main_py_path}")
-        except Exception as e:
-            raise Exception(f"Erreur lors du téléchargement du main.py: {e}")
-            
-    def install_ollama(self):
-        """Installe Ollama via subprocess si nécessaire"""
-        try:
-            # Vérifier si ollama est déjà installé
-            result = subprocess.run(["which", "ollama"], 
-                                  capture_output=True, text=True)
-            if result.returncode == 0:
-                self.log("  ✓ Ollama est déjà installé")
-                return
-                
-            self.log("  ⬇ Installation d'Ollama...")
-            
-            if self.system == "Darwin":  # macOS
-                # Télécharger et installer Ollama sur macOS
-                self.log("  → Détecté: macOS")
-                subprocess.run(["curl", "-fsSL", 
-                              "https://ollama.ai/install.sh"],
-                             check=True)
-                
-            elif self.system == "Linux":
-                # Installation sur Linux
-                self.log("  → Détecté: Linux")
-                subprocess.run(["curl", "-fsSL", 
-                              "https://ollama.ai/install.sh"],
-                             check=True)
-            else:
-                raise Exception(f"Système non supporté: {self.system}")
-                
-            self.log("  ✓ Ollama installé avec succès")
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors de l'installation d'Ollama: {e}")
-            
-    def download_model(self):
-        """Télécharge le modèle llama3.2:3b"""
-        try:
-            # Vérifier si le modèle est déjà téléchargé
-            result = subprocess.run(["ollama", "list"], 
-                                  capture_output=True, text=True)
-            if "llama3.2:3b" in result.stdout:
-                self.log("  ✓ Le modèle llama3.2:3b est déjà téléchargé")
-                return
-                
-            self.log("  ⬇ Téléchargement de llama3.2:3b (cela peut prendre du temps)...")
-            
-            # Lancer le processus avec affichage en temps réel
-            process = subprocess.Popen(
-                ["ollama", "pull", "llama3.2:3b"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            
-            # Afficher chaque ligne en temps réel
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                self.log(f"    {line.rstrip()}")
-            
-            # Attendre la fin
-            process.wait()
-            
-            if process.returncode != 0:
-                raise Exception("Erreur lors du téléchargement du modèle")
-                
-            self.log("  ✓ Modèle llama3.2:3b téléchargé avec succès")
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors du téléchargement du modèle: {e}")
-            
-    def create_kitt_ai(self):
-        """Crée l'IA KITT avec le Modelfile"""
-        try:
-            self.log("  🤖 Création de l'IA KITT...")
-            
-            # Lancer le processus avec affichage en temps réel
-            process = subprocess.Popen(
-                ["ollama", "create", "kitt-ai", "-f", str(self.modelfile_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1
-            )
-            
-            # Afficher les logs en temps réel depuis stdout
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                self.log(f"    {line.rstrip()}")
-            
-            # Attendre la fin du processus
-            process.wait()
-            
-            # Vérifier les erreurs
-            if process.returncode != 0:
-                stderr_lines = process.stderr.readlines()
-                for line in stderr_lines:
-                    self.log(f"    ❌ {line.rstrip()}")
-                raise Exception(f"Ollama create a échoué avec le code {process.returncode}")
-                
-            self.log("  ✓ IA KITT créée avec succès")
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors de la création de KITT: {e}")
-            
-    def install_pyinstaller(self):
-        """Installe PyInstaller via pip"""
-        try:
-            self.log("  ⬇ Installation de PyInstaller...")
-            
-            result = subprocess.run([sys.executable, "-m", "pip", "install", 
-                                   "pyinstaller", "--break-system-packages"],
-                                  capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                self.log(f"  ⚠ Tentative sans --break-system-packages")
-                result = subprocess.run([sys.executable, "-m", "pip", "install", 
-                                       "pyinstaller"],
-                                      capture_output=True, text=True)
-                
-            self.log("  ✓ PyInstaller installé")
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors de l'installation de PyInstaller: {e}")
-            
-    def compile_with_pyinstaller(self):
+
+    def fn_compile_application(self):
+        os.chdir(self.kitt_dir)
         if self.system == "Darwin":
-            self.log("Lancement & installtion")
-            os.system("pip install py2app --break-system-packages")
-            self.log("Installé. Création de l'app.")
-            os.system("cd ~/.kitt && py2applet --make-setup main.py")
-            os.system("cd ~/.kitt && python3 setup.py py2app -A && cp ~/.kitt/dist/main* ~/Applications/KITT.app")
-            self.log("OK.")
-        else:
-            azerty=input("Etes-vous sur mac ? (o/n)")
-            if azerty=="o":
-                self.log("Lancement & installtion")
-                os.system("pip install py2app --break-system-packages")
-                self.log("Installé. Création de l'app.")
-                os.system("cd ~/.kitt && py2applet --make-setup main.py")
-                os.system("cd ~/.kitt && python3 setup.py py2app -A && cp ~/.kitt/dist/main* ~/Applications/KITT.app")
-                self.log("OK.")
-            else:
-                self.log("Linux : implémentez la fonction pour linux.")
-        
-    def copy_executable(self):
-        self.log("Déjà copié")
+            self.fn_log_both("MAC : Préparation py2app")
+            subprocess.run([sys.executable, "-m", "pip", "install", "py2app", "--break-system-packages"], check=True)
+            if os.path.exists("setup.py"): os.remove("setup.py")
+            subprocess.run(["py2applet", "--make-setup", "main.py"], check=True)
+            subprocess.run([sys.executable, "setup.py", "py2app", "-A"], check=True)
             
-    def run(self):
-        """Lance l'interface graphique"""
+            app_path = self.home / "Applications" / "KITT.app"
+            if app_path.exists(): shutil.rmtree(app_path)
+            shutil.move("dist/main.app", str(app_path))
+            self.fn_log_both(f"MAC : Application déplacée dans {app_path}")
+        else:
+            self.fn_log_both("LINUX : Préparation PyInstaller")
+            subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller", "--break-system-packages"], check=True)
+            subprocess.run(["pyinstaller", "--onefile", "--noconsole", "main.py"], check=True)
+            shutil.copy2("dist/main", str(self.home / "Desktop" / "KITT"))
+            self.fn_log_both("LINUX : Exécutable copié sur le Bureau")
+
+    def fn_run_ui(self):
         self.root.mainloop()
 
-
 if __name__ == "__main__":
-    installer = KITTInstaller()
-    installer.run()
+    app = KITTInstaller()
+    app.fn_run_ui()
