@@ -329,72 +329,27 @@ class KITTInstaller:
             raise Exception(f"Erreur lors de l'installation de PyInstaller: {e}")
             
     def compile_with_pyinstaller(self):
-        """Compile main.py avec PyInstaller"""
-        try:
-            main_py = self.kitt_dir / "main.py"
-            
-            if not main_py.exists():
-                raise Exception("main.py non trouvé dans ~/.kitt - Le téléchargement a échoué")
-                
-            self.log("  🔨 Compilation avec PyInstaller...")
-            
-            result = subprocess.run(["pyinstaller", "--noconsole", "--onefile", 
-                                   str(main_py)],
-                                  cwd=str(self.kitt_dir),
-                                  capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                self.log(f"  ⚠ Erreur: {result.stderr}")
-                raise Exception(f"PyInstaller a échoué: {result.stderr}")
-                
-            self.log("  ✓ Compilation réussie")
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors de la compilation: {e}")
-
-    def copy_executable(self):
-        """Copie l'exécutable sur le bureau et ajoute à ~/.bashrc"""
-        try:
-            dist_dir = self.kitt_dir / "dist"
-            
-            if not dist_dir.exists():
-                raise Exception(f"Dossier dist non trouvé: {dist_dir}")
-                
-            # Trouver le fichier exécutable
-            executables = list(dist_dir.glob("main*"))
-            if not executables:
-                raise Exception("Aucun exécutable trouvé dans dist/")
-                
-            executable = executables[0]
-            self.log(f"  📦 Exécutable trouvé: {executable}")
-            
-            # Copier sur le bureau
-            desktop = self.home / "Desktop" / executable.name
-            desktop.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(executable, desktop)
-            os.chmod(desktop, 0o755)
-            self.log(f"  ✓ Copié sur le desktop: {desktop}")
-            
-            # Ajouter au ~/.bashrc
-            bashrc = self.home / ".bashrc"
-            bashrc_content = ""
-            
-            if bashrc.exists():
-                with open(bashrc, 'r') as f:
-                    bashrc_content = f.read()
-                    
-            # Ajouter l'alias si pas déjà présent
-            alias_line = f"alias kitt='{desktop}'"
-            if "alias kitt=" not in bashrc_content:
-                bashrc_content += f"\n\n# KITT shortcut\n{alias_line}\n"
-                with open(bashrc, 'w') as f:
-                    f.write(bashrc_content)
-                self.log(f"  ✓ Alias 'kitt' ajouté au ~/.bashrc")
+        if self.system == "Darwin":
+            self.log("Lancement & installtion")
+            os.system("pip install py2app --break-system-packages")
+            self.log("Installé. Création de l'app.")
+            os.system("cd ~/.kitt && py2applet --make-setup main.py")
+            os.system("cd ~/.kitt && python3 setup.py py2app -A && cp ~/.kitt/dist/main* ~/Applications/KITT.app")
+            self.log("OK.")
+        else:
+            azerty=input("Etes-vous sur mac ? (o/n)")
+            if azerty=="o":
+                self.log("Lancement & installtion")
+                os.system("pip install py2app --break-system-packages")
+                self.log("Installé. Création de l'app.")
+                os.system("cd ~/.kitt && py2applet --make-setup main.py")
+                os.system("cd ~/.kitt && python3 setup.py py2app -A && cp ~/.kitt/dist/main* ~/Applications/KITT.app")
+                self.log("OK.")
             else:
-                self.log(f"  ✓ Alias 'kitt' déjà présent dans ~/.bashrc")
-                
-        except Exception as e:
-            raise Exception(f"Erreur lors de la copie des fichiers: {e}")
+                self.log("Linux : implémentez la fonction pour linux.")
+        
+    def copy_executable(self):
+        self.log("Déjà copié")
             
     def run(self):
         """Lance l'interface graphique"""
