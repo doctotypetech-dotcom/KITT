@@ -9,7 +9,7 @@ import requests
 import ssl
 import threading
 import os
-
+os.system("python3 -m pip install requests")
 # Configuration
 EMAIL = "aurcocy@mailo.com"
 IMAP_SERVER = "mail.mailo.com"
